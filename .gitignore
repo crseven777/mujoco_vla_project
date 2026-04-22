@@ -1,0 +1,55 @@
+# ---------------------------
+# Python cache / build
+# ---------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# ---------------------------
+# Virtual envs (local)
+# ---------------------------
+.venv/
+venv/
+env/
+
+# ---------------------------
+# IDE / local tool state
+# ---------------------------
+.codex
+.vscode/
+.idea/
+
+# ---------------------------
+# Logs / crash dumps
+# ---------------------------
+*.log
+MUJOCO_LOG.TXT
+core
+core.*
+
+# ---------------------------
+# MuJoCo / runtime artifacts
+# ---------------------------
+*.mp4
+*.avi
+*.gif
+
+# ---------------------------
+# Generated data
+# Keep only lightweight curated samples in repo
+# ---------------------------
+data/raw/
+data/processed/
+data/samples/*
+!data/samples/.gitkeep
+!data/samples/README.md
+
+# ---------------------------
+# Duplicate source assets directory not used by scripts
+# (runtime code uses assets/, not g1/)
+# ---------------------------
+g1/
+

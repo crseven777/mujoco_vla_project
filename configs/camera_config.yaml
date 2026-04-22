@@ -1,0 +1,22 @@
+# Camera configuration for G1 upper body scene
+
+# Front camera parameters
+camera:
+  name: "front_camera"
+  width: 640
+  height: 480
+  fovy: 60  # degrees
+  
+  # Camera pose (position and orientation)
+  position: [1.0, 0.0, 1.5]  # x, y, z
+  euler: [-0.5, 0.0, 1.57]   # roll, pitch, yaw (radians)
+  
+  # Intrinsic parameters (will be computed from fovy)
+  # fx = fy = (height / 2) / tan(fovy / 2)
+  # cx = width / 2
+  # cy = height / 2
+
+# Rendering settings
+rendering:
+  depth_near: 0.1  # meters
+  depth_far: 10.0  # meters

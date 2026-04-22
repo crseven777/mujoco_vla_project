@@ -1,273 +1,138 @@
 # mujoco_vla_project
 
-
 ## 项目简介
 
-本项目旨在完成以下目标：
+本项目用于完成以下链路：
 
-* 在 MuJoCo 中搭建 Unitree G1 上半身仿真场景
-* 实现上半身末端（双手）目标位置跟随控制
-* 接入 XR 遥操输入，实现 XR → MuJoCo 闭环
-* 采集标准化上半身遥操数据集
-* 在统一接口下 Benchmark ACT / GR00T / DP3 等策略
+- 在 MuJoCo 中搭建 G1 上半身任务场景
+- 实现上半身末端目标位置跟随（当前为右手）
+- 打通 RGBD 相机读取与数据录制
+- 为后续 XR 遥操接入、数据采集与 benchmark 做准备
 
-当前阶段：**阶段 0（环境配置与项目初始化）**
+当前代码状态：**阶段 1 核心闭环可运行**（上半身末端跟随 + RGBD 接口 + 同步存储）。
 
----
+## 环境要求
 
-## 一、环境要求
+- Ubuntu 22.04（推荐）
+- Python 3.10
+- MuJoCo 3.x
+- Conda（推荐）
 
-### 硬件要求
-
-* Ubuntu 22.04（推荐）
-* NVIDIA GPU（推荐 RTX 3060 及以上）
-* 至少 16GB 内存
-
-### 软件要求
-
-* Miniconda / Anaconda
-* Git
-* Python 3.10
-* MuJoCo 3.x
-
----
-
-## 二、环境安装步骤
-
-## 1. 创建 Conda 环境
+## 安装步骤
 
 ```bash
 conda create -n mujoco_vla python=3.10 -y
 conda activate mujoco_vla
-```
 
----
-
-## 2. 安装系统依赖（Ubuntu）
-
-```bash
-sudo apt update
-sudo apt install -y \
-    libgl1-mesa-glx \
-    libglfw3 \
-    libglew-dev \
-    libosmesa6-dev \
-    libxrender1 \
-    libxext6 \
-    libx11-6 \
-    patchelf \
-    tree
-```
-
----
-
-## 3. 安装 Python 依赖
-
-```bash
 pip install --upgrade pip
 pip install mujoco glfw numpy scipy matplotlib opencv-python imageio tqdm
 ```
 
----
-
-## 4. 验证 MuJoCo 安装
+可选（Ubuntu 下离屏渲染常用依赖）：
 
 ```bash
-python -c "import mujoco; print(mujoco.__version__)"
+sudo apt update
+sudo apt install -y libgl1-mesa-glx libglfw3 libglew-dev libosmesa6-dev libxrender1 libxext6 libx11-6
 ```
 
-若成功输出版本号，说明安装完成。
+## 快速开始（阶段 1）
 
----
+### 1. 运行末端跟随 + RGBD 采集
 
-## 三、项目目录结构
+```bash
+conda activate mujoco_vla
+python scripts/run_stage1.py --duration 10 --save-video
+```
+
+或使用脚本入口：
+
+```bash
+bash scripts/record_data.sh 10 data/raw
+```
+
+### 2. 可视化最新 episode
+
+```bash
+python scripts/visualize_data.py --latest
+```
+
+### 3. 生成目标点样例（多点/轨迹）
+
+```bash
+python scripts/generate_target_points.py --type static --output target_points.npy
+python scripts/generate_target_points.py --type multi --output target_points.npy
+python scripts/generate_target_points.py --type circle --output target_points.npy
+```
+
+## 当前阶段实现说明
+
+- 场景文件：`assets/g1_upper_body_scene.xml`
+- 末端控制：`controllers/pd_controller.py`
+- 阶段入口：`scripts/run_stage1.py`
+- RGBD 接口：`envs/rgbd_camera.py`
+- 数据录制：`envs/data_recorder.py`
+- 可视化检查：`scripts/visualize_data.py`
+
+当前任务设置：
+
+- 基座固定（weld）
+- 非任务关节锁定
+- 右手末端跟随红色目标点 `target_right`
+
+## 数据输出格式
+
+每次运行会在 `data/raw/episode_xxx/` 下生成：
 
 ```text
-mujoco_vla_project/
-├── README.md
-├── test_mujoco.py                  # Mujoco 基础测试脚本
-├── assets/                         # Robot XML / URDF / 场景资源
-├── configs/                        # 相机 / 控制器参数
-├── teleop/                         # XR 遥操桥接模块
-├── envs/                           # Mujoco 环境封装
-├── controllers/                    # IK / tracking controller
-├── data/
-│   ├── raw/                        # 原始遥操录制数据
-│   ├── processed/                  # 处理后的训练数据
-│   └── samples/                    # 示例 episode
-├── benchmark/
-│   ├── datasets/                   # 数据适配器
-│   ├── policies/                   # ACT / DP3 / GR00T
-│   ├── evaluators/                 # 测试评估模块
-│   └── results/                    # benchmark 输出结果
-├── scripts/
-│   ├── launch_scene.sh             # 启动 Mujoco 场景
-│   ├── run_teleop.sh               # 启动 XR 遥操
-│   ├── record_data.sh              # 数据录制
-│   └── run_benchmark.sh            # benchmark 总入口
-└── docs/
-    └── undergrad_guide.md
-```
-
----
-
-## 四、如何启动 MuJoCo 场景
-
-## 1. 基础测试场景
-
-```bash
-python test_mujoco.py
-```
-
-运行后应看到：
-
-* 地面平面
-* 一个方块自由下落
-
-说明 MuJoCo Viewer 正常。
-
----
-
-## 2. 启动 G1 上半身场景（后续阶段）
-
-```bash
-bash scripts/launch_scene.sh
-```
-
-说明：
-
-该脚本负责：
-
-* 加载 G1 上半身 XML 模型
-* 初始化相机
-* 启动控制循环
-
----
-
-## 五、如何启动 XR 遥操模块
-
-XR Teleoperate 仓库建议单独管理：
-
-```text
-~/xr_teleoperate/
-```
-
-### 1. 克隆 XR 仓库
-
-```bash
-git clone --depth=1 https://github.com/unitreerobotics/xr_teleoperate.git
-```
-
----
-
-### 2. 启动 XR 遥操（后续阶段）
-
-```bash
-bash scripts/run_teleop.sh
-```
-
-说明：
-
-该脚本负责：
-
-* 启动 XR 输入读取
-* 坐标系转换
-* 输出末端目标位置
-* 与 MuJoCo 通信
-
----
-
-## 六、数据保存位置
-
-所有录制数据统一保存在：
-
-```text
-data/raw/
-```
-
-推荐单条 episode 格式：
-
-```text
-episode_001/
+episode_xxx/
 ├── meta.json
 ├── rgb/
+│   ├── 000000.png
+│   └── ...
 ├── depth/
+│   ├── 000000.npy
+│   └── ...
 ├── state.npy
 ├── action.npy
 ├── target_eef.npy
 ├── actual_eef.npy
+├── timestamps.npy
+├── frame_indices.npy
+├── camera_intrinsics.npy
+├── camera_extrinsics.npy
+├── camera_timestamps.npy
 └── success.txt
 ```
 
-说明：
+## 阶段 1 验收建议
 
-* rgb：相机彩色图像
-* depth：深度图
-* state：机器人状态
-* action：控制输入
-* target_eef：目标末端轨迹
-* actual_eef：实际末端轨迹
+1. 能加载场景并看到右手追踪红球  
+2. 误差曲线下降并稳定在小范围  
+3. `rgb/depth/state/target/actual/timestamp` 帧数一致  
+4. 多次运行结果趋势一致
 
----
-
-## 七、Benchmark 入口脚本
-
-统一 benchmark 启动入口：
+快速检查命令（最新 episode）：
 
 ```bash
-bash scripts/run_benchmark.sh
+python - <<'PY'
+import os, glob, numpy as np
+base='data/raw'
+ep=sorted([d for d in os.listdir(base) if d.startswith('episode_')])[-1]
+p=os.path.join(base,ep)
+state=np.load(os.path.join(p,'state.npy'))
+target=np.load(os.path.join(p,'target_eef.npy'))
+actual=np.load(os.path.join(p,'actual_eef.npy'))
+ts=np.load(os.path.join(p,'timestamps.npy'))
+cts=np.load(os.path.join(p,'camera_timestamps.npy'))
+err=np.linalg.norm(actual-target,axis=1)
+print('episode:',ep)
+print('steps:',len(ts),'rgb:',len(glob.glob(p+'/rgb/*.png')),'depth:',len(glob.glob(p+'/depth/*.npy')))
+print('final_error:',float(err[-1]),'mean_error:',float(err.mean()))
+print('max|camera_ts-ts|:',float(np.abs(cts-ts).max()))
+PY
 ```
 
-后续功能：
+## 说明
 
-* 加载 train / val / test 数据
-* 启动 ACT / DP3 / GR00T
-* 输出 success rate / tracking error / latency 等指标
-
-结果保存在：
-
-```text
-benchmark/results/
-```
-
----
-
-## 八、当前阶段已完成内容（阶段 0）
-
-请按实际进度勾选：
-
-* [ ] Conda 环境创建完成
-* [ ] MuJoCo 安装完成
-* [ ] MuJoCo demo 可运行
-* [ ] 项目目录创建完成
-* [ ] README 完成
-* [ ] XR 仓库下载完成
-
----
-
-## 九、快速复现指南
-
-新用户拿到仓库后：
-
-```bash
-git clone <your_repo>
-cd mujoco_vla_project
-
-conda create -n mujoco_vla python=3.10 -y
-conda activate mujoco_vla
-
-pip install mujoco glfw numpy scipy matplotlib opencv-python imageio tqdm
-
-python test_mujoco.py
-```
-
-若看到 MuJoCo Viewer 正常弹出，即说明环境配置成功。
-
----
-
-## 十、后续计划
-
-* 阶段 1：G1 上半身末端跟随 + RGBD 接口
-* 阶段 2：XR 遥操接入
-* 阶段 3：采集 50 条标准化上半身数据
-* 阶段 4：统一 Benchmark ACT / GR00T / DP3
+- `scripts/run_teleop.sh`、`scripts/train_act.sh`、`scripts/eval_all.sh` 当前仍是占位脚本（后续阶段实现）。
+- 若在无显示环境运行，建议设置 `MUJOCO_GL=osmesa`。

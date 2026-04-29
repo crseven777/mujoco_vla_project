@@ -22,6 +22,8 @@
     
     <!-- Target visualization for right hand -->
     <site name="target_right" pos="0.3 -0.3 1.2" size="0.03" rgba="1 0 0 0.5" type="sphere"/>
+    <!-- Target visualization for left hand -->
+    <site name="target_left" pos="0.3 0.3 1.2" size="0.03" rgba="0 0 1 0.5" type="sphere"/>
     
     <!-- Fixed camera for RGBD -->
     <camera name="front_camera" pos="1.0 0 1.5" euler="-0.5 0 1.57" fovy="60"/>

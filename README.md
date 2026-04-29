@@ -35,12 +35,18 @@ sudo apt update
 sudo apt install -y libgl1-mesa-glx libglfw3 libglew-dev libosmesa6-dev libxrender1 libxext6 libx11-6
 ```
 
-## 快速开始（阶段 1）
+## 快速开始（阶段 1 最终增强版）
 
-### 1. 运行末端跟随 + RGBD 采集
+### 1. 阶段 1 当前支持能力
+
+- 右手固定目标点跟随（可视化）
+- 双手连续轨迹跟随
+- RGBD 读取与保存（`rgb + depth + camera intrinsics/extrinsics + timestamp`）
+- 同步记录：`joint_state/action/target_eef/actual_eef/tracking_error/timestamp`
+
+### 2. 运行右手固定目标点跟随（可视化窗口）
 
 ```bash
-conda activate mujoco_vla
 python scripts/run_stage1.py --duration 10 --save-video
 ```
 
@@ -50,13 +56,19 @@ python scripts/run_stage1.py --duration 10 --save-video
 bash scripts/record_data.sh 10 data/raw
 ```
 
-### 2. 可视化最新 episode
+### 3. 录制双手连续轨迹 sample episode
 
 ```bash
-python scripts/visualize_data.py --latest
+python scripts/record_stage1_bimanual_trajectory.py
 ```
 
-### 3. 生成目标点样例（多点/轨迹）
+### 4. 可视化录制结果
+
+```bash
+python scripts/visualize_data.py data/samples/stage1_bimanual_trajectory
+```
+
+### 5. 生成目标点样例（工具脚本）
 
 ```bash
 python scripts/generate_target_points.py --type static --output target_points.npy
@@ -68,16 +80,22 @@ python scripts/generate_target_points.py --type circle --output target_points.np
 
 - 场景文件：`assets/g1_upper_body_scene.xml`
 - 末端控制：`controllers/pd_controller.py`
+- 双手控制包装：`controllers/bimanual_controller.py`
+- 目标生成：`controllers/target_provider.py`
+- 轨迹生成：`controllers/trajectory_generator.py`
 - 阶段入口：`scripts/run_stage1.py`
+- 阶段 1 统一管线：`scripts/stage1_pipeline.py`
 - RGBD 接口：`envs/rgbd_camera.py`
-- 数据录制：`envs/data_recorder.py`
+- 阶段 1 日志：`envs/stage1_logger.py`
+- 兼容数据录制：`envs/data_recorder.py`
 - 可视化检查：`scripts/visualize_data.py`
 
 当前任务设置：
 
 - 基座固定（weld）
 - 非任务关节锁定
-- 右手末端跟随红色目标点 `target_right`
+- 右手目标 marker：`target_right`（红色）
+- 左手目标 marker：`target_left`（蓝色）
 
 ## 数据输出格式
 
@@ -104,31 +122,66 @@ episode_xxx/
 └── success.txt
 ```
 
-## 阶段 1 验收建议
+`scripts/record_stage1_bimanual_trajectory.py` 的输出格式：
 
-1. 能加载场景并看到右手追踪红球  
-2. 误差曲线下降并稳定在小范围  
-3. `rgb/depth/state/target/actual/timestamp` 帧数一致  
-4. 多次运行结果趋势一致
+```text
+data/samples/stage1_bimanual_trajectory/
+├── meta.json
+├── rgb/
+│   ├── 000000.png
+│   └── ...
+├── depth/
+│   ├── 000000.npy
+│   └── ...
+├── joint_state.npy
+├── action.npy
+├── target_eef_left.npy
+├── target_eef_right.npy
+├── actual_eef_left.npy
+├── actual_eef_right.npy
+├── tracking_error_left.npy
+├── tracking_error_right.npy
+├── timestamp.npy
+└── camera_meta.json
+```
 
-快速检查命令（最新 episode）：
+## 阶段 1 最终验收方式
+
+1. 运行可视化跟随：`python scripts/run_stage1.py --duration 10`
+2. 录制双手轨迹样本：`python scripts/record_stage1_bimanual_trajectory.py`
+3. 检查 `data/samples/stage1_bimanual_trajectory/meta.json` 中 summary 指标：
+   - `left.final` / `right.final` 小于 `tracking_threshold`
+   - `has_nan=false` 且 `has_divergence=false`
+4. 检查 RGBD 输出：
+   - `rgb/*.png` 与 `depth/*.npy` 编号对齐
+   - `camera_meta.json` 存在
+5. 多次重复运行趋势一致（建议至少 3 次）
+
+阶段 1 完成标准：
+1. 右手末端能稳定跟随目标点或连续轨迹
+2. 左手末端能稳定跟随目标点或连续轨迹
+3. 双手同时跟随时无明显发散或 NaN
+4. final tracking error left/right 小于配置阈值（默认 `0.05m`）
+5. mean tracking error left/right 在合理范围内
+6. 能保存 RGB 图像
+7. 能保存 depth npy
+8. 能保存 joint_state、action、target_eef、actual_eef、tracking_error、timestamp
+9. 多次运行结果基本一致
+
+快速检查命令（双手轨迹样本）：
 
 ```bash
 python - <<'PY'
-import os, glob, numpy as np
-base='data/raw'
-ep=sorted([d for d in os.listdir(base) if d.startswith('episode_')])[-1]
-p=os.path.join(base,ep)
-state=np.load(os.path.join(p,'state.npy'))
-target=np.load(os.path.join(p,'target_eef.npy'))
-actual=np.load(os.path.join(p,'actual_eef.npy'))
-ts=np.load(os.path.join(p,'timestamps.npy'))
-cts=np.load(os.path.join(p,'camera_timestamps.npy'))
-err=np.linalg.norm(actual-target,axis=1)
-print('episode:',ep)
-print('steps:',len(ts),'rgb:',len(glob.glob(p+'/rgb/*.png')),'depth:',len(glob.glob(p+'/depth/*.npy')))
-print('final_error:',float(err[-1]),'mean_error:',float(err.mean()))
-print('max|camera_ts-ts|:',float(np.abs(cts-ts).max()))
+import os, glob, json, numpy as np
+p='data/samples/stage1_bimanual_trajectory'
+el=np.load(os.path.join(p,'tracking_error_left.npy'))
+er=np.load(os.path.join(p,'tracking_error_right.npy'))
+with open(os.path.join(p,'meta.json'),'r',encoding='utf-8') as f:
+    meta=json.load(f)
+print('steps:',len(el),'rgb:',len(glob.glob(p+'/rgb/*.png')),'depth:',len(glob.glob(p+'/depth/*.npy')))
+print('left final/mean:',float(el[-1]),float(np.nanmean(el)))
+print('right final/mean:',float(er[-1]),float(np.nanmean(er)))
+print('summary:',meta.get('summary',{}))
 PY
 ```
 

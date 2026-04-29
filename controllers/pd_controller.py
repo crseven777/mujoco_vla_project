@@ -92,6 +92,8 @@ class PDController:
 
         # Prefer a natural arm posture around initial qpos.
         self.posture_ref = self.data.qpos[self.arm_joint_qpos_ids].copy()
+        self.last_action = np.zeros(len(self.arm_joint_qvel_ids), dtype=float)
+        self.last_target_joint_pos = self.posture_ref.copy()
     
     def get_eef_jacobian(self):
         """Compute end-effector position and Jacobian.""" 
@@ -120,6 +122,7 @@ class PDController:
         bias_torque = self.data.qfrc_bias[self.arm_joint_qvel_ids].copy()
         torques = bias_torque + self.kp * pos_error + self.kd * vel_error
         torques = np.clip(torques, self.arm_torque_lower, self.arm_torque_upper)
+        self.last_action = torques.copy()
         
         # Apply torques to arm joints
         self.data.ctrl[self.arm_actuator_ids] = torques
@@ -172,11 +175,13 @@ class PDController:
             dt = self.model.opt.timestep
         target_joint_pos = current_joint_pos + desired_vel * dt
         target_joint_pos = np.clip(target_joint_pos, self.arm_joint_lower, self.arm_joint_upper)
+        self.last_target_joint_pos = target_joint_pos.copy()
         
         if self.control_mode == "kinematic":
             # Directly update joint states in kinematic mode for smooth, stable tracking.
             joint_vel = (target_joint_pos - current_joint_pos) / max(dt, 1e-6)
             joint_vel = np.clip(joint_vel, -self.max_joint_speed, self.max_joint_speed)
+            self.last_action = joint_vel.copy()
             self.data.qpos[self.arm_joint_qpos_ids] = target_joint_pos
             self.data.qvel[self.arm_joint_qvel_ids] = joint_vel
         else:

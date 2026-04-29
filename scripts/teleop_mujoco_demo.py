@@ -88,6 +88,7 @@ def run_demo(
     output_dir: str,
     max_joint_speed: float | None = None,
     task_gain: float | None = None,
+    hand_mode: str = "bimanual",
 ):
     stage1_cfg = load_simple_yaml(cfg_stage1)
     bridge_cfg_dict = load_simple_yaml(cfg_bridge)
@@ -105,9 +106,9 @@ def run_demo(
     cfg_max_joint_speed = float(stage1_cfg.get("max_joint_speed", 0.6))
     cfg_task_gain = float(stage1_cfg.get("task_gain", 2.0))
     if mode == "teleop":
-        # Teleop defaults should be responsive even without CLI tuning.
-        cfg_max_joint_speed = max(cfg_max_joint_speed, 1.6)
-        cfg_task_gain = max(cfg_task_gain, 3.5)
+        # Teleop-following priority: default higher bandwidth on controller side.
+        cfg_max_joint_speed = max(cfg_max_joint_speed, 2.2)
+        cfg_task_gain = max(cfg_task_gain, 5.0)
     controller = BimanualController(
         model=model,
         data=data,
@@ -149,8 +150,7 @@ def run_demo(
             right_min_bound=np.asarray(bridge_cfg_dict.get("right_min_bound", [0.10, -0.55, 0.70]), dtype=float),
             right_max_bound=np.asarray(bridge_cfg_dict.get("right_max_bound", [0.75, -0.02, 1.45]), dtype=float),
             smoothing_alpha=float(bridge_cfg_dict.get("smoothing_alpha", 0.2)),
-            max_target_speed_left=float(bridge_cfg_dict.get("max_target_speed_left", 0.35)),
-            max_target_speed_right=float(bridge_cfg_dict.get("max_target_speed_right", 0.25)),
+            max_target_speed=float(bridge_cfg_dict.get("max_target_speed", 0.0)),
             debug=True,
             debug_every_n=20,
         )
@@ -189,11 +189,15 @@ def run_demo(
                 if mode == "teleop":
                     left_target = bridge_out["left_target_pos"]
                     right_target = bridge_out["right_target_pos"]
+                    if hand_mode == "right_only":
+                        left_target = None
                     mode_name = "teleop"
                 else:
                     tgt = target_provider.get_target(data.time)
                     left_target = tgt["left_target_pos"]
                     right_target = tgt["right_target_pos"]
+                    if hand_mode == "right_only":
+                        left_target = None
                     mode_name = "trajectory"
 
                 out = controller.step(left_target, right_target, dt=control_dt)
@@ -214,7 +218,8 @@ def run_demo(
                 _draw_sphere(viewer.user_scn, 1, xr_right, 0.03, (0.2, 0.8, 0.2, 0.8))
 
                 # Visualize bridge / controller targets (red/blue)
-                _draw_sphere(viewer.user_scn, 2, np.asarray(left_target, dtype=float), 0.035, (0.1, 0.3, 1.0, 0.7))
+                left_tgt_vis = np.asarray(left_target, dtype=float) if left_target is not None else left_actual
+                _draw_sphere(viewer.user_scn, 2, left_tgt_vis, 0.035, (0.1, 0.3, 1.0, 0.7))
                 _draw_sphere(viewer.user_scn, 3, np.asarray(right_target, dtype=float), 0.035, (1.0, 0.1, 0.1, 0.7))
 
                 # Visualize actual eef positions (yellow/cyan)
@@ -225,7 +230,7 @@ def run_demo(
                 logger.record(
                     frame_idx=ctrl_count - 1,
                     timestamp=float(data.time),
-                    mode=mode_name,
+                    mode=f"{mode_name}:{hand_mode}",
                     joint_state=joint_state,
                     action=out["action"],
                     target_left=left_target,
@@ -260,6 +265,7 @@ def run_demo(
         meta={
             "task_name": "stage2_bridge_demo",
             "mode": mode,
+            "hand_mode": hand_mode,
             "summary": summary,
             "bridge_config": bridge_cfg_dict,
             "stage1_config": cfg_stage1,
@@ -280,6 +286,7 @@ if __name__ == "__main__":
     parser.add_argument("--output-dir", type=str, default="data/samples/stage2_bridge_demo")
     parser.add_argument("--max-joint-speed", type=float, default=None, help="Override arm joint speed limit (rad/s)")
     parser.add_argument("--task-gain", type=float, default=None, help="Override task-space gain")
+    parser.add_argument("--hand-mode", choices=["bimanual", "right_only"], default="bimanual")
     args = parser.parse_args()
 
     run_demo(
@@ -291,4 +298,5 @@ if __name__ == "__main__":
         output_dir=args.output_dir,
         max_joint_speed=args.max_joint_speed,
         task_gain=args.task_gain,
+        hand_mode=args.hand_mode,
     )

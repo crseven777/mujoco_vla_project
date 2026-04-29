@@ -72,10 +72,28 @@ python scripts/record_stage1_bimanual_trajectory.py
 python scripts/teleop_mujoco_demo.py --mode teleop
 ```
 
+右手单手稳定模式（推荐先跑这个）：
+
+```bash
+python scripts/teleop_mujoco_demo.py --mode teleop --hand-mode right_only
+```
+
+说明（默认策略）：
+
+- `teleop` 模式采用“跟手优先”默认：优先提升控制带宽，而不是在 bridge 层强行限速目标。
+- bridge 默认仅做：坐标变换、缩放、工作空间裁剪、轻度低通滤波。
+- `configs/bridge.yaml` 中 `max_target_speed` 默认 `0.0`（关闭目标限速）。
+
 `trajectory` 模式（沿用阶段 1 目标生成）：
 
 ```bash
 python scripts/teleop_mujoco_demo.py --mode trajectory
+```
+
+`trajectory` 也支持右手单手模式：
+
+```bash
+python scripts/teleop_mujoco_demo.py --mode trajectory --hand-mode right_only
 ```
 
 调快手臂响应（可选）：
@@ -83,6 +101,8 @@ python scripts/teleop_mujoco_demo.py --mode trajectory
 ```bash
 python scripts/teleop_mujoco_demo.py --mode trajectory --max-joint-speed 1.5 --task-gain 3.5
 ```
+
+`teleop` 模式下，脚本内部默认会使用更高控制带宽（无需手动传参）以提高遥操作跟随性。
 
 ### 5. 可视化录制结果
 
@@ -128,6 +148,7 @@ python scripts/generate_target_points.py --type circle --output target_points.np
 - 输入：`head_pose`（可选）、`left_wrist_pose`、`right_wrist_pose`（mock）
 - 输出：`left_target_pos`、`right_target_pos`
 - 处理链：坐标变换（4x4）-> 缩放（xyz）-> 工作空间裁剪 -> 低通平滑
+- 默认原则：bridge 尽量保持输入意图，不在 bridge 内做强限速拖手
 - 当前不做：真实 XR 设备接入、网络通信、抓取/手指控制
 
 ## 数据输出格式
@@ -229,3 +250,4 @@ PY
 - `scripts/run_teleop.sh`、`scripts/train_act.sh`、`scripts/eval_all.sh` 当前仍是占位脚本（后续阶段实现）。
 - 若在无显示环境运行，建议设置 `MUJOCO_GL=osmesa`。
 - 按指导文档建议，调试顺序优先：右手单手 -> 左手单手 -> 双手同步（便于定位坐标、控制、可达空间问题）。
+- 当前脚本已支持 `--hand-mode right_only`，建议先在 `teleop` 下跑稳右手，再切回默认 `bimanual`。

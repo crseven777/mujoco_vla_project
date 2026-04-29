@@ -105,9 +105,8 @@ class BridgeConfig:
     right_max_bound: np.ndarray = field(default_factory=lambda: np.array([0.75, -0.02, 1.45]))
     # smoothing alpha
     smoothing_alpha: float = 0.2
-    # Additional target motion limiter (m/s) to guarantee trackable target speed.
-    max_target_speed_left: float = 0.35
-    max_target_speed_right: float = 0.25
+    # Optional target motion limiter (m/s). Set <=0 to disable.
+    max_target_speed: float = 0.0
     debug: bool = False
     debug_every_n: int = 20
 
@@ -152,6 +151,8 @@ class XRTeleopBridge:
 
     def _speed_limit(self, target: np.ndarray, prev: Optional[np.ndarray], dt: float, max_speed: float) -> np.ndarray:
         if prev is None or dt <= 1e-6:
+            return target
+        if max_speed <= 0.0:
             return target
         max_step = max(1e-6, max_speed * dt)
         delta = target - prev
@@ -200,8 +201,8 @@ class XRTeleopBridge:
         # 4) Exponential smoothing
         left_target = self._lowpass(left_clamped, self._left_prev, self.cfg.smoothing_alpha)
         right_target = self._lowpass(right_clamped, self._right_prev, self.cfg.smoothing_alpha)
-        left_target = self._speed_limit(left_target, self._left_prev, dt, self.cfg.max_target_speed_left)
-        right_target = self._speed_limit(right_target, self._right_prev, dt, self.cfg.max_target_speed_right)
+        left_target = self._speed_limit(left_target, self._left_prev, dt, self.cfg.max_target_speed)
+        right_target = self._speed_limit(right_target, self._right_prev, dt, self.cfg.max_target_speed)
         left_target = self._finite_or_prev(left_target, self._left_prev)
         right_target = self._finite_or_prev(right_target, self._right_prev)
         self._left_prev = left_target.copy()

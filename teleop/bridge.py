@@ -95,7 +95,9 @@ class BridgeConfig:
     scale_xyz: np.ndarray = field(default_factory=lambda: np.array([1.0, 1.0, 1.0]))
     # origin alignment
     xr_origin: np.ndarray = field(default_factory=lambda: np.array([0.0, 0.0, 0.0]))
-    robot_origin: np.ndarray = field(default_factory=lambda: np.array([0.35, 0.0, 1.05]))
+    # Per-hand robot neutral origins (more stable than one shared origin).
+    left_robot_origin: np.ndarray = field(default_factory=lambda: np.array([0.35, 0.22, 1.05]))
+    right_robot_origin: np.ndarray = field(default_factory=lambda: np.array([0.35, -0.22, 1.05]))
     # workspace clamp
     left_min_bound: np.ndarray = field(default_factory=lambda: np.array([0.10, 0.02, 0.70]))
     left_max_bound: np.ndarray = field(default_factory=lambda: np.array([0.75, 0.55, 1.45]))
@@ -103,6 +105,9 @@ class BridgeConfig:
     right_max_bound: np.ndarray = field(default_factory=lambda: np.array([0.75, -0.02, 1.45]))
     # smoothing alpha
     smoothing_alpha: float = 0.2
+    # Additional target motion limiter (m/s) to guarantee trackable target speed.
+    max_target_speed_left: float = 0.35
+    max_target_speed_right: float = 0.25
     debug: bool = False
     debug_every_n: int = 20
 
@@ -114,15 +119,19 @@ class XRTeleopBridge:
         self.cfg = config if config is not None else BridgeConfig()
         self._validate()
         self._frame = 0
+        self._last_ts = None
         self._left_prev = None
         self._right_prev = None
+        self._left_xr_ref = None
+        self._right_xr_ref = None
         self._last_debug = {}
 
     def _validate(self) -> None:
         self.cfg.transform_matrix = np.asarray(self.cfg.transform_matrix, dtype=float).reshape(4, 4)
         self.cfg.scale_xyz = np.asarray(self.cfg.scale_xyz, dtype=float).reshape(3,)
         self.cfg.xr_origin = np.asarray(self.cfg.xr_origin, dtype=float).reshape(3,)
-        self.cfg.robot_origin = np.asarray(self.cfg.robot_origin, dtype=float).reshape(3,)
+        self.cfg.left_robot_origin = np.asarray(self.cfg.left_robot_origin, dtype=float).reshape(3,)
+        self.cfg.right_robot_origin = np.asarray(self.cfg.right_robot_origin, dtype=float).reshape(3,)
         self.cfg.left_min_bound = np.asarray(self.cfg.left_min_bound, dtype=float).reshape(3,)
         self.cfg.left_max_bound = np.asarray(self.cfg.left_max_bound, dtype=float).reshape(3,)
         self.cfg.right_min_bound = np.asarray(self.cfg.right_min_bound, dtype=float).reshape(3,)
@@ -134,10 +143,22 @@ class XRTeleopBridge:
         wrist_T_robot = self.cfg.transform_matrix @ wrist_T_xr
         return mat4_to_pose7(wrist_T_robot)
 
-    def _scale_and_origin(self, pos_robot: np.ndarray) -> np.ndarray:
+    def _scale_and_origin(self, pos_robot: np.ndarray, xr_ref: np.ndarray, robot_origin: np.ndarray) -> np.ndarray:
         centered = pos_robot - self.cfg.xr_origin
-        scaled = self.cfg.scale_xyz * centered
-        return scaled + self.cfg.robot_origin
+        centered_ref = xr_ref - self.cfg.xr_origin
+        delta = centered - centered_ref
+        scaled = self.cfg.scale_xyz * delta
+        return scaled + robot_origin
+
+    def _speed_limit(self, target: np.ndarray, prev: Optional[np.ndarray], dt: float, max_speed: float) -> np.ndarray:
+        if prev is None or dt <= 1e-6:
+            return target
+        max_step = max(1e-6, max_speed * dt)
+        delta = target - prev
+        dist = float(np.linalg.norm(delta))
+        if dist <= max_step:
+            return target
+        return prev + (delta / dist) * max_step
 
     @staticmethod
     def _lowpass(new: np.ndarray, prev: Optional[np.ndarray], alpha: float) -> np.ndarray:
@@ -154,6 +175,8 @@ class XRTeleopBridge:
     def update(self, xr_state: Dict) -> Dict:
         self._frame += 1
         ts = float(xr_state.get("timestamp", 0.0))
+        dt = 0.0 if self._last_ts is None else max(0.0, ts - self._last_ts)
+        self._last_ts = ts
 
         left_wrist_xr = np.asarray(xr_state["left_wrist_pose"], dtype=float).reshape(7,)
         right_wrist_xr = np.asarray(xr_state["right_wrist_pose"], dtype=float).reshape(7,)
@@ -161,10 +184,14 @@ class XRTeleopBridge:
         # 1) Coordinate transform (xr frame -> robot base frame)
         left_wrist_robot = self._transform_wrist_pose(left_wrist_xr)
         right_wrist_robot = self._transform_wrist_pose(right_wrist_xr)
+        if self._left_xr_ref is None:
+            self._left_xr_ref = left_wrist_robot[:3].copy()
+        if self._right_xr_ref is None:
+            self._right_xr_ref = right_wrist_robot[:3].copy()
 
         # 2) Scaling with origin alignment
-        left_raw_target = self._scale_and_origin(left_wrist_robot[:3])
-        right_raw_target = self._scale_and_origin(right_wrist_robot[:3])
+        left_raw_target = self._scale_and_origin(left_wrist_robot[:3], self._left_xr_ref, self.cfg.left_robot_origin)
+        right_raw_target = self._scale_and_origin(right_wrist_robot[:3], self._right_xr_ref, self.cfg.right_robot_origin)
 
         # 3) Workspace clamp
         left_clamped = np.clip(left_raw_target, self.cfg.left_min_bound, self.cfg.left_max_bound)
@@ -173,6 +200,8 @@ class XRTeleopBridge:
         # 4) Exponential smoothing
         left_target = self._lowpass(left_clamped, self._left_prev, self.cfg.smoothing_alpha)
         right_target = self._lowpass(right_clamped, self._right_prev, self.cfg.smoothing_alpha)
+        left_target = self._speed_limit(left_target, self._left_prev, dt, self.cfg.max_target_speed_left)
+        right_target = self._speed_limit(right_target, self._right_prev, dt, self.cfg.max_target_speed_right)
         left_target = self._finite_or_prev(left_target, self._left_prev)
         right_target = self._finite_or_prev(right_target, self._right_prev)
         self._left_prev = left_target.copy()

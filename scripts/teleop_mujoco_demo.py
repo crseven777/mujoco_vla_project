@@ -104,6 +104,10 @@ def run_demo(
 
     cfg_max_joint_speed = float(stage1_cfg.get("max_joint_speed", 0.6))
     cfg_task_gain = float(stage1_cfg.get("task_gain", 2.0))
+    if mode == "teleop":
+        # Teleop defaults should be responsive even without CLI tuning.
+        cfg_max_joint_speed = max(cfg_max_joint_speed, 1.6)
+        cfg_task_gain = max(cfg_task_gain, 3.5)
     controller = BimanualController(
         model=model,
         data=data,
@@ -138,12 +142,15 @@ def run_demo(
             transform_matrix=np.asarray(bridge_cfg_dict.get("transform_matrix", np.eye(4)), dtype=float),
             scale_xyz=np.asarray(bridge_cfg_dict.get("scale_factor", [1.0, 1.0, 1.0]), dtype=float),
             xr_origin=np.asarray(bridge_cfg_dict.get("xr_origin", [0.0, 0.0, 0.0]), dtype=float),
-            robot_origin=np.asarray(bridge_cfg_dict.get("robot_origin", [0.35, 0.0, 1.02]), dtype=float),
+            left_robot_origin=np.asarray(bridge_cfg_dict.get("left_robot_origin", [0.35, 0.22, 1.05]), dtype=float),
+            right_robot_origin=np.asarray(bridge_cfg_dict.get("right_robot_origin", [0.35, -0.22, 1.05]), dtype=float),
             left_min_bound=np.asarray(bridge_cfg_dict.get("left_min_bound", [0.10, 0.02, 0.70]), dtype=float),
             left_max_bound=np.asarray(bridge_cfg_dict.get("left_max_bound", [0.75, 0.55, 1.45]), dtype=float),
             right_min_bound=np.asarray(bridge_cfg_dict.get("right_min_bound", [0.10, -0.55, 0.70]), dtype=float),
             right_max_bound=np.asarray(bridge_cfg_dict.get("right_max_bound", [0.75, -0.02, 1.45]), dtype=float),
             smoothing_alpha=float(bridge_cfg_dict.get("smoothing_alpha", 0.2)),
+            max_target_speed_left=float(bridge_cfg_dict.get("max_target_speed_left", 0.35)),
+            max_target_speed_right=float(bridge_cfg_dict.get("max_target_speed_right", 0.25)),
             debug=True,
             debug_every_n=20,
         )

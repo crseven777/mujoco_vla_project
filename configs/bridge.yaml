@@ -3,15 +3,19 @@
 transform_matrix: [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]]
 
 # independent xyz scaling
-scale_factor: [1.0, 1.0, 1.0]
+scale_factor: [0.9, 0.9, 0.9]
 
 # origin alignment for scaling formula:
-# robot_target = scale * (xr_pos - xr_origin) + robot_origin
-xr_origin: [0.0, 0.0, 0.0]
-robot_origin: [0.35, 0.0, 1.02]
+# robot_target = scale * ((xr_pos - xr_origin) - (xr_ref - xr_origin)) + robot_origin
+# where xr_ref is captured at first valid frame per hand
+xr_origin: [0.0, 0.0, 0.95]
+left_robot_origin: [0.35, 0.22, 1.05]
+right_robot_origin: [0.35, -0.22, 1.05]
 
 # low-pass smoothing parameter
-smoothing_alpha: 0.2
+smoothing_alpha: 0.35
+max_target_speed_left: 0.35
+max_target_speed_right: 0.25
 
 # workspace bounds
 left_min_bound: [0.10, 0.02, 0.70]

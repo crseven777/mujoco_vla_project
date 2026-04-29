@@ -12,9 +12,9 @@ class MockXRConfig:
     base_head: tuple[float, float, float] = (0.0, 0.0, 1.55)
     base_left: tuple[float, float, float] = (-0.22, 0.18, 0.95)
     base_right: tuple[float, float, float] = (0.22, -0.18, 0.95)
-    right_radius: float = 0.12
-    left_amp: tuple[float, float, float] = (0.04, 0.03, 0.03)
-    freq_hz: float = 0.15
+    right_radius: float = 0.06
+    left_amp: tuple[float, float, float] = (0.03, 0.025, 0.02)
+    freq_hz: float = 0.10
 
 
 class MockXRInput:
@@ -36,12 +36,12 @@ class MockXRInput:
         lx, ly, lz = self.cfg.base_left
         rx, ry, rz = self.cfg.base_right
 
-        # Right wrist: circular motion in XY + small Z oscillation.
+        # Right wrist: smoother sinusoidal motion (easier to track than circle).
         right_pos = np.array(
             [
-                rx + self.cfg.right_radius * np.cos(w * t),
-                ry + self.cfg.right_radius * np.sin(w * t),
-                rz + 0.04 * np.sin(0.7 * w * t),
+                rx + 0.8 * self.cfg.right_radius * np.sin(0.9 * w * t),
+                ry + 0.6 * self.cfg.right_radius * np.sin(0.6 * w * t + np.pi / 3.0),
+                rz + 0.02 * np.sin(0.5 * w * t),
             ],
             dtype=float,
         )

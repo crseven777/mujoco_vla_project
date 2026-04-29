@@ -9,7 +9,10 @@
 - 打通 RGBD 相机读取与数据录制
 - 为后续 XR 遥操接入、数据采集与 benchmark 做准备
 
-当前代码状态：**阶段 1 核心闭环可运行**（上半身末端跟随 + RGBD 接口 + 同步存储）。
+当前代码状态：
+
+- **阶段 1 已完成**：双手末端连续轨迹跟随 + RGBD + 同步存储
+- **阶段 2 任务 2 已实现**：`mock XR -> bridge -> Mujoco target`（不含真实 XR 设备接入）
 
 ## 环境要求
 
@@ -35,16 +38,15 @@ sudo apt update
 sudo apt install -y libgl1-mesa-glx libglfw3 libglew-dev libosmesa6-dev libxrender1 libxext6 libx11-6
 ```
 
-## 快速开始（阶段 1 最终增强版）
+## 快速开始（阶段 1 + 阶段 2 bridge）
 
 ### 1. 阶段 1 当前支持能力
 
-- 右手固定目标点跟随（可视化）
 - 双手连续轨迹跟随
 - RGBD 读取与保存（`rgb + depth + camera intrinsics/extrinsics + timestamp`）
 - 同步记录：`joint_state/action/target_eef/actual_eef/tracking_error/timestamp`
 
-### 2. 运行右手固定目标点跟随（可视化窗口）
+### 2. 运行阶段 1（可视化窗口）
 
 ```bash
 python scripts/run_stage1.py --duration 10 --save-video
@@ -62,13 +64,33 @@ bash scripts/record_data.sh 10 data/raw
 python scripts/record_stage1_bimanual_trajectory.py
 ```
 
-### 4. 可视化录制结果
+### 4. 运行阶段 2 bridge demo（无真实 XR）
+
+`teleop` 模式（推荐，mock XR 输入）：
+
+```bash
+python scripts/teleop_mujoco_demo.py --mode teleop
+```
+
+`trajectory` 模式（沿用阶段 1 目标生成）：
+
+```bash
+python scripts/teleop_mujoco_demo.py --mode trajectory
+```
+
+调快手臂响应（可选）：
+
+```bash
+python scripts/teleop_mujoco_demo.py --mode trajectory --max-joint-speed 1.5 --task-gain 3.5
+```
+
+### 5. 可视化录制结果
 
 ```bash
 python scripts/visualize_data.py data/samples/stage1_bimanual_trajectory
 ```
 
-### 5. 生成目标点样例（工具脚本）
+### 6. 生成目标点样例（工具脚本）
 
 ```bash
 python scripts/generate_target_points.py --type static --output target_points.npy
@@ -87,6 +109,10 @@ python scripts/generate_target_points.py --type circle --output target_points.np
 - 阶段 1 统一管线：`scripts/stage1_pipeline.py`
 - RGBD 接口：`envs/rgbd_camera.py`
 - 阶段 1 日志：`envs/stage1_logger.py`
+- bridge：`teleop/bridge.py`
+- mock XR 输入：`teleop/mock_xr_input.py`
+- 阶段 2 demo：`scripts/teleop_mujoco_demo.py`
+- bridge 配置：`configs/bridge.yaml`
 - 兼容数据录制：`envs/data_recorder.py`
 - 可视化检查：`scripts/visualize_data.py`
 
@@ -96,6 +122,13 @@ python scripts/generate_target_points.py --type circle --output target_points.np
 - 非任务关节锁定
 - 右手目标 marker：`target_right`（红色）
 - 左手目标 marker：`target_left`（蓝色）
+
+阶段 2（任务 2）桥接职责：
+
+- 输入：`head_pose`（可选）、`left_wrist_pose`、`right_wrist_pose`（mock）
+- 输出：`left_target_pos`、`right_target_pos`
+- 处理链：坐标变换（4x4）-> 缩放（xyz）-> 工作空间裁剪 -> 低通平滑
+- 当前不做：真实 XR 设备接入、网络通信、抓取/手指控制
 
 ## 数据输出格式
 
@@ -141,6 +174,12 @@ data/samples/stage1_bimanual_trajectory/
 ├── actual_eef_right.npy
 ├── tracking_error_left.npy
 ├── tracking_error_right.npy
+├── left_wrist_pose.npy
+├── right_wrist_pose.npy
+├── raw_target_left.npy
+├── raw_target_right.npy
+├── transformed_target_left.npy
+├── transformed_target_right.npy
 ├── timestamp.npy
 └── camera_meta.json
 ```
@@ -189,3 +228,4 @@ PY
 
 - `scripts/run_teleop.sh`、`scripts/train_act.sh`、`scripts/eval_all.sh` 当前仍是占位脚本（后续阶段实现）。
 - 若在无显示环境运行，建议设置 `MUJOCO_GL=osmesa`。
+- 按指导文档建议，调试顺序优先：右手单手 -> 左手单手 -> 双手同步（便于定位坐标、控制、可达空间问题）。

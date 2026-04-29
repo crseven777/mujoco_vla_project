@@ -1,0 +1,20 @@
+# XR -> MuJoCo bridge configuration
+# transform_matrix: homogeneous transform from XR frame to robot base frame
+transform_matrix: [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]]
+
+# independent xyz scaling
+scale_factor: [1.0, 1.0, 1.0]
+
+# origin alignment for scaling formula:
+# robot_target = scale * (xr_pos - xr_origin) + robot_origin
+xr_origin: [0.0, 0.0, 0.0]
+robot_origin: [0.35, 0.0, 1.02]
+
+# low-pass smoothing parameter
+smoothing_alpha: 0.2
+
+# workspace bounds
+left_min_bound: [0.10, 0.02, 0.70]
+left_max_bound: [0.75, 0.55, 1.45]
+right_min_bound: [0.10, -0.55, 0.70]
+right_max_bound: [0.75, -0.02, 1.45]

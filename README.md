@@ -163,26 +163,6 @@ python scripts/teleop_mujoco_demo.py \
   --output-dir data/samples/stage2_right_only_real
 ```
 
-程序会打印类似：
-
-```text
-Network: https://vuer.ai?ws=wss://10.19.131.25:8012
-```
-
-如果 PICO 和电脑在 `192.168.1.x` Wi-Fi 下，不一定要用程序自动打印的地址。当前本机无线网卡地址是：
-
-```text
-192.168.1.22
-```
-
-因此 PICO 浏览器中推荐手动打开：
-
-```text
-https://vuer.ai?ws=wss://192.168.1.22:8012
-```
-
-进入网页后必须点击 **Virtual Reality** 并允许所有权限。只打开网页但不进入 VR 会话时，WebSocket 可能显示已连接，但 controller 位姿不会发送回来。
-
 通过标准：
 
 - 终端显示 `XR source: real xr_teleoperate (...)`

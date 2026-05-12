@@ -120,18 +120,29 @@ class Stage1Logger:
         def _metrics(x):
             valid = x[np.isfinite(x)]
             if valid.size == 0:
-                return {"mean": np.nan, "max": np.nan, "final": np.nan, "pass": False}
+                return {"mean": np.nan, "max": np.nan, "final": np.nan, "pass": None, "active": False}
             return {
                 "mean": float(np.mean(valid)),
                 "max": float(np.max(valid)),
                 "final": float(valid[-1]),
                 "pass": bool(valid[-1] < threshold),
+                "active": True,
             }
 
-        l = _metrics(np.asarray(err_left, dtype=float))
-        r = _metrics(np.asarray(err_right, dtype=float))
-        has_nan = bool(np.isnan(err_left).any() or np.isnan(err_right).any())
-        has_divergence = bool(np.nanmax(err_left) > 1.0 or np.nanmax(err_right) > 1.0)
+        left = np.asarray(err_left, dtype=float)
+        right = np.asarray(err_right, dtype=float)
+        l = _metrics(left)
+        r = _metrics(right)
+
+        def _has_nan_on_active_side(x):
+            return bool(np.isfinite(x).any() and np.isnan(x).any())
+
+        def _has_divergence(x):
+            valid = x[np.isfinite(x)]
+            return bool(valid.size > 0 and np.max(valid) > 1.0)
+
+        has_nan = _has_nan_on_active_side(left) or _has_nan_on_active_side(right)
+        has_divergence = _has_divergence(left) or _has_divergence(right)
         return {
             "left": l,
             "right": r,

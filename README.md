@@ -12,7 +12,8 @@
 当前代码状态：
 
 - **阶段 1 已完成**：双手末端连续轨迹跟随 + RGBD + 同步存储
-- **阶段 2 任务 2 已实现**：`mock XR -> bridge -> Mujoco target`（不含真实 XR 设备接入）
+- **阶段 2 已打通**：`PICO controller/hand -> TeleVuerWrapper -> bridge -> MuJoCo target -> G1 双手末端跟随`
+- **阶段 4 已建立骨架**：可对录制 episode 做基础 tracking benchmark，ACT / DP3 / GR00T runner 仍是待接入占位
 
 ## 环境要求
 
@@ -20,6 +21,7 @@
 - Python 3.10
 - MuJoCo 3.x
 - Conda（推荐）
+- 可选：PICO / Quest 等支持 WebXR 的 XR 设备
 
 ## 安装步骤
 
@@ -29,6 +31,18 @@ conda activate mujoco_vla
 
 pip install --upgrade pip
 pip install mujoco glfw numpy scipy matplotlib opencv-python imageio tqdm
+```
+
+真实 XR 接入还依赖 `xr_teleoperate` 的 `televuer` 模块。当前默认路径为：
+
+```text
+/home/wll/xr_teleoperate
+```
+
+如果 `mujoco_vla` 环境没有安装 `vuer/televuer`，代码会临时复用本机已有 `tv` 环境中的 Python 3.10 依赖：
+
+```text
+/home/wll/miniconda3/envs/tv/lib/python3.10/site-packages
 ```
 
 可选（Ubuntu 下离屏渲染常用依赖）：
@@ -104,13 +118,176 @@ python scripts/teleop_mujoco_demo.py --mode trajectory --max-joint-speed 1.5 --t
 
 `teleop` 模式下，脚本内部默认会使用更高控制带宽（无需手动传参）以提高遥操作跟随性。
 
-### 5. 可视化录制结果
+### 5. 接入真实 PICO / xr_teleoperate
+
+先确认 `xr_teleoperate` 已安装，默认路径假设为：
+
+```bash
+/home/wll/xr_teleoperate
+```
+
+运行本仓库的 MuJoCo demo 时，不要同时启动下面这些程序，否则它们会抢 Vuer 默认端口 `8012`：
+
+- `xr_teleoperate/teleop/teleop_hand_and_arm.py`
+- `unitree_sim_isaaclab/sim_main.py`
+
+本仓库会自己创建 `TeleVuerWrapper`，链路是：
+
+```text
+PICO controller/hand -> Vuer/TeleVuerWrapper -> adapter_xr -> bridge -> MuJoCo target -> G1 hand
+```
+
+#### 5.1 先验证 mock XR 右手
+
+```bash
+python scripts/teleop_mujoco_demo.py \
+  --mode teleop \
+  --xr-source mock \
+  --hand-mode right_only \
+  --duration 20 \
+  --output-dir data/samples/stage2_right_only_mock
+```
+
+通过标准：MuJoCo 中红球运动，机器人右手能跟随红球。
+
+#### 5.2 真实 PICO controller 右手
+
+```bash
+python scripts/teleop_mujoco_demo.py \
+  --mode teleop \
+  --xr-source real \
+  --xr-repo-root /home/wll/xr_teleoperate \
+  --xr-input-mode controller \
+  --hand-mode right_only \
+  --duration 60 \
+  --output-dir data/samples/stage2_right_only_real
+```
+
+程序会打印类似：
+
+```text
+Network: https://vuer.ai?ws=wss://10.19.131.25:8012
+```
+
+如果 PICO 和电脑在 `192.168.1.x` Wi-Fi 下，不一定要用程序自动打印的地址。当前本机无线网卡地址是：
+
+```text
+192.168.1.22
+```
+
+因此 PICO 浏览器中推荐手动打开：
+
+```text
+https://vuer.ai?ws=wss://192.168.1.22:8012
+```
+
+进入网页后必须点击 **Virtual Reality** 并允许所有权限。只打开网页但不进入 VR 会话时，WebSocket 可能显示已连接，但 controller 位姿不会发送回来。
+
+通过标准：
+
+- 终端显示 `XR source: real xr_teleoperate (...)`
+- 终端显示 `websocket is connected`
+- 移动右手 controller 时，`xr R`、`raw R -> tgt R` 数值变化
+- MuJoCo 中右手目标点和机器人右手同步运动
+
+#### 5.3 真实 PICO 手部追踪右手
+
+如果使用手部追踪而不是 controller：
+
+```bash
+python scripts/teleop_mujoco_demo.py \
+  --mode teleop \
+  --xr-source real \
+  --xr-repo-root /home/wll/xr_teleoperate \
+  --xr-input-mode hand \
+  --hand-mode right_only \
+  --duration 60 \
+  --output-dir data/samples/stage2_right_only_real
+```
+
+#### 5.4 左手单手与双手
+
+右手稳定后，单独检查左手：
+
+```bash
+python scripts/teleop_mujoco_demo.py \
+  --mode teleop \
+  --xr-source real \
+  --xr-repo-root /home/wll/xr_teleoperate \
+  --xr-input-mode controller \
+  --hand-mode left_only \
+  --duration 60 \
+  --output-dir data/samples/stage2_left_only_real
+```
+
+左右手都稳定后，切到双手：
+
+```bash
+python scripts/teleop_mujoco_demo.py \
+  --mode teleop \
+  --xr-source real \
+  --xr-repo-root /home/wll/xr_teleoperate \
+  --xr-input-mode controller \
+  --hand-mode bimanual \
+  --duration 60 \
+  --output-dir data/samples/stage2_bimanual_real
+```
+
+#### 5.5 隐藏 MuJoCo 中的调试球
+
+默认会显示 XR 原始点、目标点和实际末端位置的调试球。录制演示时如需隐藏这些球，添加：
+
+```bash
+--no-show-markers
+```
+
+示例：
+
+```bash
+python scripts/teleop_mujoco_demo.py \
+  --mode teleop \
+  --xr-source real \
+  --xr-repo-root /home/wll/xr_teleoperate \
+  --xr-input-mode controller \
+  --hand-mode bimanual \
+  --duration 60 \
+  --output-dir data/samples/stage2_bimanual_real_no_markers \
+  --no-show-markers
+```
+
+#### 5.6 常见问题
+
+如果报错 `address already in use`：
+
+```text
+error while attempting to bind on address ('0.0.0.0', 8012): address already in use
+```
+
+说明已有 Vuer 进程占用 `8012`。先检查：
+
+```bash
+ss -ltnp | grep 8012
+```
+
+关闭旧的 `teleop_hand_and_arm.py` / Vuer 进程后再运行本仓库 demo。
+
+如果网页已连接但红球不动：
+
+- 确认 PICO 里打开的是 `https://vuer.ai?ws=wss://192.168.1.22:8012`
+- 确认已点击网页里的 **Virtual Reality**
+- 确认允许了 controller / hand tracking 权限
+- 移动 controller 时终端里的 `xr R` 应该变化
+- 按 trigger / grip 时终端里的 `R trig` / `sqz` 应该变化
+
+如果 PICO 看不到机器人画面，这是正常的。当前 `--display-mode pass-through` 只使用 PICO 采集 XR 输入，MuJoCo 画面看电脑窗口。
+
+### 6. 可视化录制结果
 
 ```bash
 python scripts/visualize_data.py data/samples/stage1_bimanual_trajectory
 ```
 
-### 6. 生成目标点样例（工具脚本）
+### 7. 生成目标点样例（工具脚本）
 
 ```bash
 python scripts/generate_target_points.py --type static --output target_points.npy
@@ -149,7 +326,9 @@ python scripts/generate_target_points.py --type circle --output target_points.np
 - 输出：`left_target_pos`、`right_target_pos`
 - 处理链：坐标变换（4x4）-> 缩放（xyz）-> 工作空间裁剪 -> 低通平滑
 - 默认原则：bridge 尽量保持输入意图，不在 bridge 内做强限速拖手
-- 当前不做：真实 XR 设备接入、网络通信、抓取/手指控制
+- 真实 XR 已支持 `--xr-source real`、`--xr-input-mode controller/hand`、`--hand-mode right_only/left_only/bimanual`
+- 可用 `--no-show-markers` 隐藏 MuJoCo viewer 中的目标点和调试球
+- 当前不做：抓取/手指控制
 
 ## 数据输出格式
 
@@ -250,4 +429,48 @@ PY
 - `scripts/run_teleop.sh`、`scripts/train_act.sh`、`scripts/eval_all.sh` 当前仍是占位脚本（后续阶段实现）。
 - 若在无显示环境运行，建议设置 `MUJOCO_GL=osmesa`。
 - 按指导文档建议，调试顺序优先：右手单手 -> 左手单手 -> 双手同步（便于定位坐标、控制、可达空间问题）。
-- 当前脚本已支持 `--hand-mode right_only`，建议先在 `teleop` 下跑稳右手，再切回默认 `bimanual`。
+- 当前脚本已支持 `--hand-mode right_only/left_only/bimanual`，建议先在 `teleop` 下跑稳右手和左手，再切回默认 `bimanual`。
+- 使用真实 PICO 时，同一时间只运行一个 Vuer 服务，避免 `8012` 端口冲突。
+
+## 阶段 4 Benchmark 设计骨架
+
+当前已建立 benchmark 的统一接口骨架，但还没有接入真实 ACT / DP3 / GR00T 训练代码。
+
+目录结构：
+
+```text
+benchmark/
+├── datasets/
+│   └── dataset_adapter.py
+├── policies/
+│   ├── act_runner.py
+│   ├── dp3_runner.py
+│   └── groot_runner.py
+├── evaluators/
+│   └── evaluator.py
+├── metrics/
+│   └── metrics.py
+└── run_benchmark.py
+```
+
+当前可先对已录制 episode 做数据和指标基准检查：
+
+```bash
+python benchmark/run_benchmark.py --data-root data/samples
+```
+
+输出：
+
+- 终端打印统一结果表格
+- CSV 保存到 `benchmark/results/benchmark_summary.csv`
+
+当前表格中：
+
+- `RecordedDemo` 使用已录制数据中的 tracking error / action 计算指标
+- `ACT`、`DP3`、`GR00T` 是接口占位，等待后续接入真实训练和推理代码
+
+第一版 benchmark 数据划分按指导文件默认：
+
+- train: 35
+- val: 5
+- test: 10

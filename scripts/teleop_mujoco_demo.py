@@ -19,6 +19,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from controllers.bimanual_controller import BimanualController, LEFT_ARM_JOINTS, RIGHT_ARM_JOINTS
 from controllers.target_provider import TargetProvider, TargetProviderConfig
+from envs.rgbd_camera import RGBDCamera
 from envs.stage1_logger import Stage1Logger
 from teleop.adapter_xr import XRAdapter, XRAdapterConfig
 from teleop.bridge import BridgeConfig, XRTeleopBridge
@@ -82,6 +83,7 @@ def _draw_sphere(user_scn, idx: int, pos: np.ndarray, size: float, rgba: tuple[f
 
 def run_demo(
     duration: float,
+    warmup_duration: float,
     control_dt: float,
     mode: str,
     cfg_stage1: str,
@@ -96,6 +98,15 @@ def run_demo(
     display_mode: str = "pass-through",
     webrtc_url: str | None = None,
     show_markers: bool = True,
+    record_rgbd: bool = False,
+    save_every_n_frames: int = 1,
+    camera_name: str | None = None,
+    camera_width: int | None = None,
+    camera_height: int | None = None,
+    task_name: str = "stage2_teleop_tracking",
+    instruction: str = "follow the XR controller with the robot upper body end effectors",
+    operator_id: str = "unknown",
+    success: bool = True,
 ):
     stage1_cfg = load_simple_yaml(cfg_stage1)
     bridge_cfg_dict = load_simple_yaml(cfg_bridge)
@@ -108,7 +119,7 @@ def run_demo(
 
     timestep = model.opt.timestep
     steps_per_control = max(1, int(round(control_dt / timestep)))
-    max_steps = int(duration / timestep)
+    max_steps = int((warmup_duration + duration) / timestep)
 
     cfg_max_joint_speed = float(stage1_cfg.get("max_joint_speed", 0.6))
     cfg_task_gain = float(stage1_cfg.get("task_gain", 2.0))
@@ -177,7 +188,23 @@ def run_demo(
         xr_source = MockXRInput()
         print("XR source: mock")
 
-    logger = Stage1Logger(output_dir=output_dir, save_rgbd=False, save_every_n_frames=1)
+    camera = None
+    camera_meta = None
+    if record_rgbd:
+        camera = RGBDCamera(
+            model=model,
+            data=data,
+            camera_name=camera_name or str(stage1_cfg.get("camera_name", "front_camera")),
+            width=int(camera_width or stage1_cfg.get("camera_width", 640)),
+            height=int(camera_height or stage1_cfg.get("camera_height", 480)),
+        )
+        camera_meta = camera.get_camera_params()
+
+    logger = Stage1Logger(
+        output_dir=output_dir,
+        save_rgbd=record_rgbd,
+        save_every_n_frames=save_every_n_frames,
+    )
 
     non_arm_act_ids, non_arm_qpos_ids, non_arm_qvel_ids = _build_non_arm_holding_set(model, controller.all_active_actuator_names)
     non_arm_qpos_ref = data.qpos[non_arm_qpos_ids].copy()
@@ -193,6 +220,8 @@ def run_demo(
 
     frame_idx = 0
     ctrl_count = 0
+    record_count = 0
+    recording_started = False
     with mujoco.viewer.launch_passive(model, data) as viewer:
         # 6 spheres: xr_left, xr_right, target_left, target_right, actual_left, actual_right
         viewer.user_scn.ngeom = 6 if show_markers else 0
@@ -256,27 +285,35 @@ def run_demo(
                     _draw_sphere(viewer.user_scn, 4, left_actual, 0.02, (0.0, 1.0, 1.0, 0.9))
                     _draw_sphere(viewer.user_scn, 5, right_actual, 0.02, (1.0, 1.0, 0.0, 0.9))
 
-                joint_state = np.concatenate([data.qpos[left_qpos_ids].copy(), data.qpos[right_qpos_ids].copy()])
-                logger.record(
-                    frame_idx=ctrl_count - 1,
-                    timestamp=float(data.time),
-                    mode=f"{mode_name}:{hand_mode}",
-                    joint_state=joint_state,
-                    action=out["action"],
-                    target_left=left_target,
-                    target_right=right_target,
-                    actual_left=left_actual,
-                    actual_right=right_actual,
-                    err_left=out["left_error"],
-                    err_right=out["right_error"],
-                    camera_frame=None,
-                    left_wrist_pose=bridge_out["left_wrist_pose"],
-                    right_wrist_pose=bridge_out["right_wrist_pose"],
-                    raw_target_left=bridge_out["raw_left_target_pos"],
-                    raw_target_right=bridge_out["raw_right_target_pos"],
-                    transformed_target_left=bridge_out["left_target_pos"],
-                    transformed_target_right=bridge_out["right_target_pos"],
-                )
+                is_recording = data.time >= warmup_duration
+                if is_recording and not recording_started:
+                    recording_started = True
+                    print(f"Recording started at sim t={data.time:.2f}s")
+
+                if is_recording:
+                    camera_frame = camera.capture(timestamp=float(data.time - warmup_duration)) if camera is not None else None
+                    joint_state = np.concatenate([data.qpos[left_qpos_ids].copy(), data.qpos[right_qpos_ids].copy()])
+                    logger.record(
+                        frame_idx=record_count,
+                        timestamp=float(data.time - warmup_duration),
+                        mode=f"{mode_name}:{hand_mode}",
+                        joint_state=joint_state,
+                        action=out["action"],
+                        target_left=left_target,
+                        target_right=right_target,
+                        actual_left=left_actual,
+                        actual_right=right_actual,
+                        err_left=out["left_error"],
+                        err_right=out["right_error"],
+                        camera_frame=camera_frame,
+                        left_wrist_pose=bridge_out["left_wrist_pose"],
+                        right_wrist_pose=bridge_out["right_wrist_pose"],
+                        raw_target_left=bridge_out["raw_left_target_pos"],
+                        raw_target_right=bridge_out["raw_right_target_pos"],
+                        transformed_target_left=bridge_out["left_target_pos"],
+                        transformed_target_right=bridge_out["right_target_pos"],
+                    )
+                    record_count += 1
 
                 if ctrl_count % 20 == 0:
                     xr_right_pos = np.asarray(xr_state["right_wrist_pose"][:3], dtype=float)
@@ -299,16 +336,27 @@ def run_demo(
     summary = Stage1Logger.summarize_errors(err_l, err_r, threshold=0.05)
     logger.save(
         meta={
-            "task_name": "stage2_bridge_demo",
+            "task_name": task_name,
+            "instruction": instruction,
+            "robot_type": "g1_29dof_upper_body",
+            "operator_id": operator_id,
+            "sampling_rate_hz": float(1.0 / control_dt),
+            "warmup_duration": warmup_duration,
+            "record_duration": duration,
             "mode": mode,
             "hand_mode": hand_mode,
+            "xr_source": xr_source_kind,
+            "xr_input_mode": "hand" if use_hand_tracking else "controller",
             "show_markers": show_markers,
+            "success": success,
             "summary": summary,
             "bridge_config": bridge_cfg_dict,
             "stage1_config": cfg_stage1,
         },
-        camera_meta=None,
+        camera_meta=camera_meta,
     )
+    if camera is not None:
+        camera.close()
     xr_source.close()
     print(f"Saved logs to: {output_dir}")
 
@@ -317,6 +365,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Stage2 Task2 demo: XR/bridge to MuJoCo target tracking")
     parser.add_argument("--mode", choices=["trajectory", "teleop"], default="teleop")
     parser.add_argument("--duration", type=float, default=20.0)
+    parser.add_argument("--warmup-duration", type=float, default=0.0, help="Run this many sim seconds before recording")
     parser.add_argument("--control-dt", type=float, default=0.01)
     parser.add_argument("--stage1-config", type=str, default="configs/stage1_bimanual_trajectory.yaml")
     parser.add_argument("--bridge-config", type=str, default="configs/bridge.yaml")
@@ -329,6 +378,19 @@ if __name__ == "__main__":
     parser.add_argument("--xr-input-mode", choices=["hand", "controller"], default="hand")
     parser.add_argument("--display-mode", type=str, default="pass-through")
     parser.add_argument("--webrtc-url", type=str, default=None)
+    parser.add_argument("--record-rgbd", action="store_true", help="Record RGB/depth frames and camera parameters")
+    parser.add_argument("--save-every-n-frames", type=int, default=1, help="Save every N control frames when recording RGBD")
+    parser.add_argument("--camera-name", type=str, default=None)
+    parser.add_argument("--camera-width", type=int, default=None)
+    parser.add_argument("--camera-height", type=int, default=None)
+    parser.add_argument("--task-name", type=str, default="stage2_teleop_tracking")
+    parser.add_argument(
+        "--instruction",
+        type=str,
+        default="follow the XR controller with the robot upper body end effectors",
+    )
+    parser.add_argument("--operator-id", type=str, default="unknown")
+    parser.add_argument("--success", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument(
         "--show-markers",
         action=argparse.BooleanOptionalAction,
@@ -339,6 +401,7 @@ if __name__ == "__main__":
 
     run_demo(
         duration=args.duration,
+        warmup_duration=args.warmup_duration,
         control_dt=args.control_dt,
         mode=args.mode,
         cfg_stage1=args.stage1_config,
@@ -353,4 +416,13 @@ if __name__ == "__main__":
         display_mode=args.display_mode,
         webrtc_url=args.webrtc_url,
         show_markers=args.show_markers,
+        record_rgbd=args.record_rgbd,
+        save_every_n_frames=args.save_every_n_frames,
+        camera_name=args.camera_name,
+        camera_width=args.camera_width,
+        camera_height=args.camera_height,
+        task_name=args.task_name,
+        instruction=args.instruction,
+        operator_id=args.operator_id,
+        success=args.success,
     )

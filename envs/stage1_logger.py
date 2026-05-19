@@ -11,6 +11,18 @@ import imageio.v3 as iio
 import numpy as np
 
 
+def _jsonify(value):
+    if isinstance(value, np.ndarray):
+        return value.tolist()
+    if isinstance(value, np.generic):
+        return value.item()
+    if isinstance(value, dict):
+        return {k: _jsonify(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_jsonify(v) for v in value]
+    return value
+
+
 @dataclass
 class Stage1Logger:
     output_dir: str
@@ -35,14 +47,15 @@ class Stage1Logger:
     mode: list[str] = field(default_factory=list)
     camera_timestamps: list[float] = field(default_factory=list)
     camera_frame_indices: list[int] = field(default_factory=list)
+    camera_intrinsics: list[np.ndarray] = field(default_factory=list)
+    camera_extrinsics: list[np.ndarray] = field(default_factory=list)
 
     def __post_init__(self):
         os.makedirs(self.output_dir, exist_ok=True)
         self.rgb_dir = os.path.join(self.output_dir, "rgb")
         self.depth_dir = os.path.join(self.output_dir, "depth")
-        if self.save_rgbd:
-            os.makedirs(self.rgb_dir, exist_ok=True)
-            os.makedirs(self.depth_dir, exist_ok=True)
+        os.makedirs(self.rgb_dir, exist_ok=True)
+        os.makedirs(self.depth_dir, exist_ok=True)
 
     def _as3(self, v):
         if v is None:
@@ -85,14 +98,36 @@ class Stage1Logger:
             np.save(os.path.join(self.depth_dir, f"{frame_idx:06d}.npy"), camera_frame["depth"])
             self.camera_timestamps.append(float(camera_frame.get("timestamp", timestamp)))
             self.camera_frame_indices.append(frame_idx)
+            if camera_frame.get("intrinsics") is not None:
+                self.camera_intrinsics.append(np.asarray(camera_frame["intrinsics"], dtype=float).copy())
+            if camera_frame.get("extrinsics") is not None:
+                self.camera_extrinsics.append(np.asarray(camera_frame["extrinsics"], dtype=float).copy())
 
     def save(self, meta: dict, camera_meta: dict | None = None):
-        np.save(os.path.join(self.output_dir, "joint_state.npy"), np.asarray(self.joint_state, dtype=float))
-        np.save(os.path.join(self.output_dir, "action.npy"), np.asarray(self.action, dtype=float))
-        np.save(os.path.join(self.output_dir, "target_eef_left.npy"), np.asarray(self.target_eef_left, dtype=float))
-        np.save(os.path.join(self.output_dir, "target_eef_right.npy"), np.asarray(self.target_eef_right, dtype=float))
-        np.save(os.path.join(self.output_dir, "actual_eef_left.npy"), np.asarray(self.actual_eef_left, dtype=float))
-        np.save(os.path.join(self.output_dir, "actual_eef_right.npy"), np.asarray(self.actual_eef_right, dtype=float))
+        joint_state = np.asarray(self.joint_state, dtype=float)
+        action = np.asarray(self.action, dtype=float)
+        target_left = np.asarray(self.target_eef_left, dtype=float)
+        target_right = np.asarray(self.target_eef_right, dtype=float)
+        actual_left = np.asarray(self.actual_eef_left, dtype=float)
+        actual_right = np.asarray(self.actual_eef_right, dtype=float)
+        timestamps = np.asarray(self.timestamps, dtype=float)
+
+        target_eef = np.concatenate([target_left, target_right], axis=1) if target_left.size and target_right.size else np.empty((0, 6))
+        actual_eef = np.concatenate([actual_left, actual_right], axis=1) if actual_left.size and actual_right.size else np.empty((0, 6))
+
+        # Canonical stage-3 episode contract.
+        np.save(os.path.join(self.output_dir, "state.npy"), joint_state)
+        np.save(os.path.join(self.output_dir, "action.npy"), action)
+        np.save(os.path.join(self.output_dir, "target_eef.npy"), target_eef)
+        np.save(os.path.join(self.output_dir, "actual_eef.npy"), actual_eef)
+        np.save(os.path.join(self.output_dir, "timestamps.npy"), timestamps)
+
+        # Detailed bimanual fields kept for debugging and benchmark adapters.
+        np.save(os.path.join(self.output_dir, "joint_state.npy"), joint_state)
+        np.save(os.path.join(self.output_dir, "target_eef_left.npy"), target_left)
+        np.save(os.path.join(self.output_dir, "target_eef_right.npy"), target_right)
+        np.save(os.path.join(self.output_dir, "actual_eef_left.npy"), actual_left)
+        np.save(os.path.join(self.output_dir, "actual_eef_right.npy"), actual_right)
         np.save(os.path.join(self.output_dir, "tracking_error_left.npy"), np.asarray(self.tracking_error_left, dtype=float))
         np.save(os.path.join(self.output_dir, "tracking_error_right.npy"), np.asarray(self.tracking_error_right, dtype=float))
         np.save(os.path.join(self.output_dir, "left_wrist_pose.npy"), np.asarray(self.left_wrist_pose, dtype=float))
@@ -101,19 +136,45 @@ class Stage1Logger:
         np.save(os.path.join(self.output_dir, "raw_target_right.npy"), np.asarray(self.raw_target_right, dtype=float))
         np.save(os.path.join(self.output_dir, "transformed_target_left.npy"), np.asarray(self.transformed_target_left, dtype=float))
         np.save(os.path.join(self.output_dir, "transformed_target_right.npy"), np.asarray(self.transformed_target_right, dtype=float))
-        np.save(os.path.join(self.output_dir, "timestamp.npy"), np.asarray(self.timestamps, dtype=float))
+        np.save(os.path.join(self.output_dir, "timestamp.npy"), timestamps)
 
         if self.save_rgbd:
             np.save(os.path.join(self.output_dir, "camera_timestamps.npy"), np.asarray(self.camera_timestamps, dtype=float))
             np.save(os.path.join(self.output_dir, "camera_frame_indices.npy"), np.asarray(self.camera_frame_indices, dtype=int))
+            if self.camera_intrinsics:
+                np.save(os.path.join(self.output_dir, "camera_intrinsics.npy"), np.asarray(self.camera_intrinsics, dtype=float))
+            if self.camera_extrinsics:
+                np.save(os.path.join(self.output_dir, "camera_extrinsics.npy"), np.asarray(self.camera_extrinsics, dtype=float))
             if camera_meta is not None:
                 with open(os.path.join(self.output_dir, "camera_meta.json"), "w", encoding="utf-8") as f:
-                    json.dump(camera_meta, f, indent=2)
+                    json.dump(_jsonify(camera_meta), f, indent=2)
 
         meta = dict(meta)
         meta["date"] = datetime.now().isoformat()
+        meta["episode_length"] = int(timestamps.shape[0])
+        meta.setdefault("task_name", "upper_body_eef_tracking")
+        meta.setdefault("instruction", "follow the target end-effector positions")
+        meta.setdefault("robot_type", "g1_29dof_upper_body")
+        meta.setdefault("operator_id", "unknown")
+        if "sampling_rate_hz" not in meta and "sampling_rate" in meta:
+            meta["sampling_rate_hz"] = meta["sampling_rate"]
+        meta.setdefault("sampling_rate_hz", 0.0)
+        if "success" not in meta:
+            summary = meta.get("summary", {})
+            active_passes = [
+                side.get("pass")
+                for side in (summary.get("left", {}), summary.get("right", {}))
+                if side.get("active", True)
+            ]
+            meta["success"] = bool(active_passes and all(active_passes))
+        meta["has_rgbd"] = bool(self.save_rgbd and self.camera_frame_indices)
+        meta["rgb_frame_count"] = int(len(self.camera_frame_indices))
         with open(os.path.join(self.output_dir, "meta.json"), "w", encoding="utf-8") as f:
-            json.dump(meta, f, indent=2)
+            json.dump(_jsonify(meta), f, indent=2)
+
+        success = bool(meta.get("success", False))
+        with open(os.path.join(self.output_dir, "success.txt"), "w", encoding="utf-8") as f:
+            f.write("1\n" if success else "0\n")
 
     @staticmethod
     def summarize_errors(err_left: np.ndarray, err_right: np.ndarray, threshold: float) -> dict:

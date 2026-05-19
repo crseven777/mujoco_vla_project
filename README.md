@@ -267,7 +267,75 @@ ss -ltnp | grep 8012
 python scripts/visualize_data.py data/samples/stage1_bimanual_trajectory
 ```
 
-### 7. 生成目标点样例（工具脚本）
+### 7. 采集标准 episode（阶段 3 数据格式）
+
+阶段 3 采集时，每条 episode 至少包含：
+
+```text
+episode_xxx/
+├── meta.json
+├── rgb/
+├── depth/
+├── state.npy
+├── action.npy
+├── target_eef.npy
+├── actual_eef.npy
+├── timestamps.npy
+└── success.txt
+```
+
+`scripts/teleop_mujoco_demo.py` 会同时保留左右手详细字段，如 `target_eef_left.npy`、`tracking_error_right.npy`，便于调试和 benchmark。
+
+真实 PICO controller 双手采集示例：
+
+```bash
+python scripts/teleop_mujoco_demo.py \
+  --mode teleop \
+  --xr-source real \
+  --xr-repo-root /home/wll/xr_teleoperate \
+  --xr-input-mode controller \
+  --hand-mode bimanual \
+  --duration 60 \
+  --record-rgbd \
+  --save-every-n-frames 1 \
+  --task-name upper_body_bimanual_follow \
+  --instruction "follow the operator's left and right controller trajectories with both robot hands" \
+  --operator-id operator_001 \
+  --output-dir data/raw/episode_001_bimanual_follow
+```
+
+如果本条录制失败，保留数据但标为失败样本：
+
+```bash
+python scripts/teleop_mujoco_demo.py ... --no-success
+```
+
+录完后立即检查格式：
+
+```bash
+python scripts/check_episode_format.py data/raw/episode_001_bimanual_follow --require-rgbd
+```
+
+`meta.json` 会记录：
+
+- `task_name`
+- `instruction`
+- `robot_type`
+- `sampling_rate_hz`
+- `episode_length`
+- `operator_id`
+- `date`
+- `success`
+- bridge / controller 配置和误差 summary
+
+建议 50 条数据按固定模板录制：
+
+- 20 条：右手或左手单手目标跟随
+- 15 条：单手连续轨迹跟随
+- 10 条：双手同步跟随
+- 5 条：故意较难或失败样本，使用 `--no-success` 标记
+
+### 8. 生成目标点样例（工具脚本）
 
 ```bash
 python scripts/generate_target_points.py --type static --output target_points.npy
